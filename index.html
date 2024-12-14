@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+
+<body>
+    <script type="module">
+        import { createToken as orgCreateToken, Lexer, CstParser } from "https://unpkg.com/chevrotain@11.0.3/lib/chevrotain.min.mjs";
+        // ----------------- lexer -----------------
+        const allTokens = [];
+
+        // Utility to avoid manually building the allTokens array
+        function createToken(options) {
+            const newToken = orgCreateToken(options);
+            allTokens.push(newToken);
+            return newToken;
+        }
+
+        createToken({
+            name: "WhiteSpace",
+            pattern: /\s+/,
+            group: Lexer.SKIPPED,
+        });
+
+        const If = createToken({ name: "If", pattern: /if/ });
+        const Else = createToken({ name: "Else", pattern: /else/ });
+        const While = createToken({ name: "While", pattern: /while/ });
+        const Do = createToken({ name: "Do", pattern: /do/ });
+        const LCurly = createToken({ name: "LCurly", pattern: /{/ });
+        const RCurly = createToken({ name: "RCurly", pattern: /}/ });
+        const LParen = createToken({ name: "LParen", pattern: /\(/ });
+        const RParen = createToken({ name: "RParen", pattern: /\)/ });
+        const SemiColon = createToken({ name: "SemiColon", pattern: /;/ });
+        const Equals = createToken({ name: "Equals", pattern: /=/ });
+        const LessThan = createToken({ name: "LessThan", pattern: /</ });
+        const Plus = createToken({ name: "Plus", pattern: /\+/ });
+        const Minus = createToken({ name: "Minus", pattern: /-/ });
+        const INT = createToken({ name: "INT", pattern: /[0-9]+/ });
+        // TODO: resolve ambiguity keywords vs identifiers
+        const ID = createToken({ name: "ID", pattern: /[a-z]+/ });
+
+        const TinyCLexer = new Lexer(allTokens);
+
+        // ----------------- parser -----------------
+
+        class TinyCParser extends CstParser {
+            // Unfortunately no support for class fields with initializer in ES2015, only in esNext...
+            // so the parsing rules are defined inside the constructor, as each parsing rule must be initialized by
+            // invoking RULE(...)
+            // see: https://github.com/jeffmo/es-class-fields-and-static-properties
+            constructor() {
+                super(allTokens);
+
+                this.RULE("program", () => {
+                    this.MANY(() => {
+                        this.SUBRULE(this.statement);
+                    });
+                });
+
+                this.RULE("statement", () => {
+                    this.OR([
+                        { ALT: () => this.SUBRULE(this.ifStatement) },
+                        { ALT: () => this.SUBRULE(this.whileStatement) },
+                        { ALT: () => this.SUBRULE(this.doStatement) },
+                        { ALT: () => this.SUBRULE(this.blockStatement) },
+                        { ALT: () => this.SUBRULE(this.expressionStatement) },
+                        { ALT: () => this.SUBRULE(this.emptyStatement) },
+                    ]);
+                });
+
+                this.RULE("ifStatement", () => {
+                    this.CONSUME(If);
+                    this.SUBRULE(this.paren_expr);
+                    this.SUBRULE(this.statement);
+                    this.OPTION(() => {
+                        this.CONSUME(Else);
+                        this.SUBRULE2(this.statement);
+                    });
+                });
+
+                this.RULE("whileStatement", () => {
+                    this.CONSUME(While);
+                    this.SUBRULE(this.paren_expr);
+                    this.SUBRULE(this.statement);
+                });
+
+                this.RULE("doStatement", () => {
+                    this.CONSUME(Do);
+                    this.SUBRULE(this.statement);
+                    this.CONSUME(While);
+                    this.SUBRULE(this.paren_expr);
+                    this.CONSUME(SemiColon);
+                });
+
+                this.RULE("blockStatement", () => {
+                    this.CONSUME(LCurly);
+                    this.MANY(() => {
+                        this.SUBRULE(this.statement);
+                    });
+                    this.CONSUME(RCurly);
+                });
+
+                this.RULE("expressionStatement", () => {
+                    this.SUBRULE(this.expression);
+                    this.CONSUME(SemiColon);
+                });
+
+                this.RULE("expression", () => {
+                    this.OR([
+                        { ALT: () => this.SUBRULE(this.assignExpression) },
+                        { ALT: () => this.SUBRULE(this.relationExpression) },
+                    ]);
+                });
+
+                this.RULE("relationExpression", () => {
+                    this.SUBRULE(this.AdditionExpression);
+                    this.MANY(() => {
+                        this.CONSUME(LessThan);
+                        this.SUBRULE2(this.AdditionExpression);
+                    });
+                });
+
+                this.RULE("AdditionExpression", () => {
+                    this.SUBRULE(this.term);
+                    this.MANY(() => {
+                        this.OR([{ ALT: () => this.CONSUME(Plus) }, { ALT: () => this.CONSUME(Minus) }]);
+                        this.SUBRULE2(this.term);
+                    });
+                });
+
+                this.RULE("assignExpression", () => {
+                    this.CONSUME(ID);
+                    this.CONSUME(Equals);
+                    this.SUBRULE(this.expression);
+                });
+
+                this.RULE("term", () => {
+                    this.OR([
+                        { ALT: () => this.CONSUME(ID) },
+                        { ALT: () => this.CONSUME(INT) },
+                        { ALT: () => this.SUBRULE(this.paren_expr) },
+                    ]);
+                });
+
+                this.RULE("paren_expr", () => {
+                    this.CONSUME(LParen);
+                    this.SUBRULE(this.expression);
+                    this.CONSUME(RParen);
+                });
+
+                this.RULE("emptyStatement", () => {
+                    this.CONSUME(SemiColon);
+                });
+
+                // very important to call this after all the rules have been defined.
+                // otherwise the parser may not work correctly as it will lack information
+                // derived during the self analysis phase.
+                this.performSelfAnalysis();
+            }
+        }
+
+        // ----------------- wrapping it all together -----------------
+
+        // reuse the same parser instance.
+        const parser = new TinyCParser();
+
+        function parseTinyC(text) {
+            const lexResult = TinyCLexer.tokenize(text);
+
+            // setting a new input will RESET the parser instance's state.
+            parser.input = lexResult.tokens;
+
+            // any top level rule may be used as an entry point
+            const cst = parser.program();
+
+            return {
+                cst: cst,
+                lexErrors: lexResult.errors,
+                parseErrors: parser.errors,
+            };
+        }
+
+        const result = parseTinyC(`a = 10;`);
+        debugger;
+    </script>
+</body>
+
+</html>
