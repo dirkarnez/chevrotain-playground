@@ -1,5 +1,5 @@
-chevrotain-playground
-=====================
+[chevrotain-playground](https://dirkarnez.github.io/chevrotain-playground)
+==========================================================================
 ### Using
 - [Chevrotain/chevrotain: Parser Building Toolkit for JavaScript](https://github.com/Chevrotain/chevrotain)
   - [Chevrotain](https://chevrotain.io/docs/)
